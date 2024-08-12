@@ -28,6 +28,15 @@ set -o pipefail
 BASE_DIR="$( cd "$( dirname "$0" )" && pwd )"
 
 TEMP_DIR="$( mktemp -d )"
+LOCAL_YAML_DIR="${BASE_DIR}/local-yaml"
+
+# RBAC files
+CSI_PROVISIONER_RBAC="${LOCAL_YAML_DIR}/csi-provisioner-rbac.yaml"
+CSI_ATTACHER_RBAC="${LOCAL_YAML_DIR}/csi-attacher-rbac.yaml"
+CSI_SNAPSHOTTER_RBAC="${LOCAL_YAML_DIR}/csi-snapshotter-rbac.yaml"
+CSI_RESIZER_RBAC="${LOCAL_YAML_DIR}/csi-resizer-rbac.yaml"
+CSI_EXTERNALHEALTH_MONITOR_RBAC="${LOCAL_YAML_DIR}/csi-external-health-monitor-rbac.yaml"
+
 trap 'rm -rf ${TEMP_DIR}' EXIT
 
 # KUBELET_DATA_DIR can be set to replace the default /var/lib/kubelet.
@@ -112,7 +121,7 @@ function rbac_version () {
 }
 
 # version_gt returns true if arg1 is greater than arg2.
-# 
+#
 # This function expects versions to be one of the following formats:
 #   X.Y.Z, release-X.Y.Z, vX.Y.Z
 #
@@ -130,11 +139,11 @@ function rbac_version () {
 # version_gt 1.3.1 v1.2.0  (returns true)
 # version_gt 1.1.1 release-1.2.0  (returns false)
 # version_gt 1.2.0 1.2.2  (returns false)
-function version_gt() { 
+function version_gt() {
     versions=$(for ver in "$@"; do ver=${ver#release-}; ver=${ver#kubernetes-}; echo ${ver#v}; done)
-    greaterVersion=${1#"release-"};  
+    greaterVersion=${1#"release-"};
     greaterVersion=${greaterVersion#"kubernetes-"};
-    greaterVersion=${greaterVersion#"v"}; 
+    greaterVersion=${greaterVersion#"v"};
     test "$(printf '%s' "$versions" | sort -V | head -n 1)" != "$greaterVersion"
 }
 
@@ -176,39 +185,7 @@ run () {
 
 # rbac rules
 echo "applying RBAC rules"
-for component in CSI_PROVISIONER CSI_ATTACHER CSI_SNAPSHOTTER CSI_RESIZER CSI_EXTERNALHEALTH_MONITOR; do
-    eval current="\${${component}_RBAC}"
-    eval original="\${${component}_RBAC_YAML}"
-    if [ "$current" != "$original" ]; then
-        echo "Using non-default RBAC rules for $component. Changes from $original to $current are:"
-        diff -c <(wget --quiet -O - "$original") <(if [[ "$current" =~ ^http ]]; then wget --quiet -O - "$current"; else cat "$current"; fi) || true
-    fi
-
-    # using kustomize kubectl plugin to add labels to he rbac files.
-    # since we are deploying rbas directly with the url, the kustomize plugin only works with the local files
-    # we need to add the files locally in temp folder and using kustomize adding labels it will be applied
-    if [[ "${current}" =~ ^http:// ]] || [[ "${current}" =~ ^https:// ]]; then
-      run curl "${current}" --output "${TEMP_DIR}"/rbac.yaml --silent --location
-    else
-        # Even for local files we need to copy because kustomize only supports files inside
-        # the root of a kustomization.
-        cp "${current}" "${TEMP_DIR}"/rbac.yaml
-    fi
-
-    cat <<- EOF > "${TEMP_DIR}"/kustomization.yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-commonLabels:
-  app.kubernetes.io/instance: hostpath.csi.k8s.io
-  app.kubernetes.io/part-of: csi-driver-host-path
-
-resources:
-- ./rbac.yaml
-EOF
-
-    run kubectl apply --kustomize "${TEMP_DIR}"
-done
+echo "${BASE_DIR}"
 
 # deploy hostpath plugin and registrar sidecar
 echo "deploying hostpath components"
